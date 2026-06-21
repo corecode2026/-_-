@@ -13610,38 +13610,8 @@ ${(window.RECEIPT?.showBarcode===true)?`<div style="margin-top:8px;text-align:ce
 </body>
 </html>`;
 
-  // ═══ طباعة مباشرة عبر iframe مخفي (بدون معاينة) ═══
-  let printFrame=document.getElementById('hidden-print-frame');
-  if(!printFrame){
-    printFrame=document.createElement('iframe');
-    printFrame.id='hidden-print-frame';
-    printFrame.style.cssText='position:fixed;right:-9999px;top:-9999px;width:0;height:0;border:0;visibility:hidden';
-    document.body.appendChild(printFrame);
-  }
-
-  try{
-    const fdoc=printFrame.contentDocument||printFrame.contentWindow.document;
-    fdoc.open(); fdoc.write(html); fdoc.close();
-
-    // انتظر تحميل المحتوى ثم اطبع
-    setTimeout(()=>{
-      try{
-        printFrame.contentWindow.focus();
-        printFrame.contentWindow.print();
-        if(typeof toast==='function') toast('🖨️ تم إرسال الفاتورة للطابعة','s');
-      }catch(e){
-        // fallback: تبويب جديد
-        const htmlAutoPrint=html.replace('</body>','<scr'+'ipt>window.addEventListener("load",function(){setTimeout(function(){try{window.print();}catch(e){}},400);});</scr'+'ipt></body>');
-        const blob=new Blob([htmlAutoPrint],{type:'text/html;charset=utf-8'});
-        const url=URL.createObjectURL(blob);
-        window.open(url,'_blank');
-        setTimeout(()=>URL.revokeObjectURL(url),60000);
-      }
-    }, 200);
-  }catch(e){
-    console.warn('print failed:',e);
-    if(typeof toast==='function') toast('⚠️ تعذّر الطباعة','e');
-  }
+  // ═══ اعرض المعاينة (المستخدم يضغط "اطبع الآن" من داخلها) ═══
+  showReceiptPreview(html, op);
 }
 
 // — نافذة معاينة الفاتورة + طباعة مباشرة —
@@ -13703,11 +13673,14 @@ function showReceiptPreview(html, op){
   printFrame.style.cssText='position:absolute;right:-9999px;top:-9999px;width:0;height:0;border:0;visibility:hidden';
   previewArea.appendChild(printFrame);
 
-  // املأ الـ iframe بالفاتورة (جاهزة للطباعة)
+  // املأ الـ iframe بالفاتورة (جاهزة للطباعة) — استخدم srcdoc للموثوقية
+  let iframeReady=false;
   setTimeout(()=>{
     try{
-      const fdoc=printFrame.contentDocument||printFrame.contentWindow.document;
-      fdoc.open();fdoc.write(html);fdoc.close();
+      printFrame.srcdoc=html;
+      printFrame.onload=()=>{iframeReady=true;};
+      // إذا onload لم يعمل، اعتبره جاهز بعد ثانية
+      setTimeout(()=>{iframeReady=true;}, 1000);
     }catch(e){console.warn('iframe fill failed',e);}
   },50);
 
@@ -13721,27 +13694,43 @@ function showReceiptPreview(html, op){
     window._receiptHTML=null;
   };
 
-  // طباعة مباشرة عبر الـ iframe
+  // طباعة مباشرة عبر الـ iframe (مع انتظار التحميل)
   document.getElementById('rp-print').onclick=()=>{
-    try{
-      printFrame.contentWindow.focus();
-      printFrame.contentWindow.print();
-      if(typeof toast==='function') toast('🖨️ تم إرسال الفاتورة للطابعة','s');
-    }catch(e){
-      // fallback: تبويب جديد
+    const tryPrint=(attempts)=>{
+      attempts=attempts||0;
+      if(attempts>10){
+        // fallback: تبويب جديد
+        try{
+          const htmlAutoPrint=html.replace('</body>','<scr'+'ipt>window.addEventListener("load",function(){setTimeout(function(){try{window.print();}catch(e){}},400);});</scr'+'ipt></body>');
+          const blob=new Blob([htmlAutoPrint],{type:'text/html;charset=utf-8'});
+          const url=URL.createObjectURL(blob);
+          window.open(url,'_blank');
+          setTimeout(()=>URL.revokeObjectURL(url),60000);
+          if(typeof toast==='function') toast('🖨️ افتح التبويب الجديد للطباعة','i');
+        }catch(e2){
+          if(typeof toast==='function') toast('⚠️ تعذّر الطباعة','w');
+        }
+        return;
+      }
+      if(!iframeReady){
+        setTimeout(()=>tryPrint(attempts+1), 200);
+        return;
+      }
       try{
+        printFrame.contentWindow.focus();
+        printFrame.contentWindow.print();
+        if(typeof toast==='function') toast('🖨️ تم إرسال الفاتورة للطابعة','s');
+      }catch(e){
+        console.warn('print error:',e);
+        // fallback
         const htmlAutoPrint=html.replace('</body>','<scr'+'ipt>window.addEventListener("load",function(){setTimeout(function(){try{window.print();}catch(e){}},400);});</scr'+'ipt></body>');
         const blob=new Blob([htmlAutoPrint],{type:'text/html;charset=utf-8'});
         const url=URL.createObjectURL(blob);
-        const a=document.createElement('a');
-        a.href=url;a.target='_blank';a.rel='noopener';
-        document.body.appendChild(a);a.click();document.body.removeChild(a);
+        window.open(url,'_blank');
         setTimeout(()=>URL.revokeObjectURL(url),60000);
-        if(typeof toast==='function') toast('🖨️ افتح التبويب الجديد للطباعة','i');
-      }catch(e2){
-        if(typeof toast==='function') toast('⚠️ تعذّر الطباعة — استخدم زر تنزيل','w');
       }
-    }
+    };
+    tryPrint();
   };
 
   // تنزيل
